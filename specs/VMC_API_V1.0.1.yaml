@@ -1,0 +1,583 @@
+openapi: 3.0.3
+info:
+  title: API machina VMC
+  description: >
+    Documentazione API per integrazione Home Assistant macchina VMC.
+    L'utente per la connessione è 'api' mentre la password è visibile nel menù impostazioni di rete della macchina.
+  version: 1.0.1
+
+servers:
+  - url: http://XXXXX_flow_it_vmc_tcp.local
+    description: Server mDNS locale, XXXXX è un codice alfanumerico di 5 caratteri derivato dal suo mac address che identifica la macchina
+  - url: http://192.168.1.xx
+    description: Indirizzo IP diretto, la macchina non ha indirizzo ip di default in quanto lo acquisisce sempre attarverso DHCP, è possibile recuperare l'indirizzo IP nella macchina nel menù impostazioni di rete della stessa
+
+tags:
+  - name: Authentication
+    description: Autenticazione JWT e Refresh
+  - name: Machine
+    description: Lettura stato e comandi macchina
+  - name: System
+    description: Endpoints di test e WebSockets
+
+paths:
+  # ==========================================
+  # AUTHENTICATION
+  # ==========================================
+  /auth:
+    post:
+      tags: [Authentication]
+      summary: Login dispositivo (Generazione JWT)
+      description: >
+        L'autenticazione avviene passando i parametri username e password in formato JSON nel body.
+        L'utente predefinito nel firmware è "api".
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username:
+                  type: string
+                  example: "api"
+                password:
+                  type: string
+                  description: >
+                    È possibile recuperare la password nel menù impostazioni di rete della macchina
+                  example: "yourpassword"
+      responses:
+        '200':
+          description: Login effettuato con successo
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token:
+                    type: string
+                    description: Token JWT generato (HS256)
+                  user:
+                    type: string
+                    example: "api"
+                  expires_in:
+                    type: integer
+                    example: 600
+        '400':
+          description: Richiesta non valida
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                body_read_failed:
+                  summary: Fallimento nella lettura del body
+                  value:
+                    error: "Failed to read body"
+                invalid_json:
+                  summary: JSON non valido
+                  value:
+                    error: "Invalid JSON"
+                missing_credentials:
+                  summary: Username o password mancanti
+                  value:
+                    error: "Missing username or password"
+        '401':
+          description: Credenziali non valide
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: "Invalid credentials"
+        '413':
+          description: Body troppo grande
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: "Body too large"
+        '500':
+          description: Errore interno del server
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                memory_allocation_failed:
+                  summary: Problema di allocazione della memoria
+                  value:
+                    error: "Memory allocation failed"
+                token_generation_failed:
+                  summary: Generazione token fallita
+                  value:
+                    error: "Token generation failed"
+
+
+  # ==========================================
+  # MACHINE CONTROL
+  # ==========================================
+  /status:
+    get:
+      tags: [Machine]
+      summary: Stato della macchina
+      description: Restituisce l'intero stato della macchina unendo i dati NVS, sensori, protezioni e stato corrente.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Dati macchina recuperati con successo
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MachineStatusResponse'
+        '401':
+          description: Invalid or missing token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: "Invalid or missing token"
+
+  /command:
+    post:
+      tags: [Machine]
+      summary: Invia un comando alla macchina
+      description: Invia un payload JSON per modificare lo stato della macchina (velocità, flussi).
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [type_message, speed, flowIn, flowOut]
+              properties:
+                type_message:
+                  type: string
+                  example: "set_parameters"
+                speed:
+                  type: string
+                  enum: ["1", "2", "3", "4", "5", "off", "auto", "boost"]
+                  description: "Velocità in formato stringa. Valori supportati dal firmware: 1-5, off, auto, boost"
+                flowIn:
+                  type: boolean
+                  description: "Stato flusso in ingresso"
+                  example: true
+                flowOut:
+                  type: boolean
+                  description: "Stato flusso in uscita"
+                  example: false
+      responses:
+        '200':
+          description: Comando processato con successo
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: "ok"
+                  speed:
+                    type: string
+                    example: "auto"
+                  flowIn:
+                    type: boolean
+                  flowOut:
+                    type: boolean
+        '400':
+          description: Invalid speed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: "Invalid speed. Use: 1-5, off, auto, boost"
+        '401':
+          description: Token mancante, non valido o scaduto
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: "Invalid, missing or expired token"
+
+  # ==========================================
+  # SYSTEM & TESTS
+  # ==========================================
+  /:
+    get:
+      tags: [System]
+      summary: Web UI di test
+      security: []
+      responses:
+        '200':
+          description: Pagina HTML di benvenuto
+          content:
+            text/html:
+              schema:
+                type: string
+
+  /info:
+    get:
+      tags: [System]
+      summary: Informazioni della macchina
+      security: []
+      responses:
+        '200':
+          description: Restituisce le informazioni base dalla machhina
+          content:
+            application/json:
+              schema:
+                 $ref: '#/components/schemas/MachineInfoResponse'
+
+  /hello:
+    get:
+      tags: [System]
+      summary: Test endpoint (Plain text)
+      security: []
+      responses:
+        '200':
+          description: Testo di saluto
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /ws:
+    get:
+      tags: [System]
+      summary: Connessione WebSocket
+      description: >
+        Endpoint per l'upgrade a WebSocket. L'handshake HTTP GET richiede un Bearer JWT valido.
+      security:
+        - bearerAuth: []
+      responses:
+        '101':
+          description: Switching Protocols (WebSocket upgrade)
+        '401':
+          description: Invalid or missing token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: "Invalid, missing or expired refresh_token"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: >
+        Prefisso obbligatorio "Bearer ". La macchina verifica l'algoritmo HS256 e la data di scadenza (exp).
+
+  schemas:
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+          description: Dettaglio dell'errore restituito dal server
+
+    MachineInfoResponse:
+      type: object
+      description: Informazioni base della macchina
+      properties:
+        model:
+          type: string
+          description: Modello della macchina
+          example: "VMC_XX"
+        api_ver:
+          type: string
+          description: Versione API
+          example: "1.0.1"
+        fw_ver:
+          type: string
+          description: Versione firmware della macchina
+          example: "1.9.3 D"
+        hw_ver:
+          type: string
+          description: Versione hardware della macchina
+          example: "1.0.0"
+        hostname:
+          type: string
+          description: Hostname della macchina
+          example: "ABC12_flow_it_vmc_tcp.local"
+
+      example:
+        model: "VMC_XX"
+        api_ver: "1.0.1"
+        fw_ver: "1.9.3 D"
+        hw_ver: "1.0.0"
+        hostname: "ABC12_flow_it_vmc_tcp.local"
+
+    MachineStatusResponse:
+      type: object
+      description: Risposta completa dello stato della macchina
+      properties:
+        lastUpdate:
+          type: integer
+          description: Timestamp Unix dell'ultimo aggiornamento
+          example: 1775720173
+        chrono_id:
+          type: string
+          description: Timer ID serve per sincronizzare il timer della macchina con il cloud
+          example: "00000000"
+        status:
+          type: boolean
+          description: Se true la macchina è pronta per ricevere i comandi, altrimenti la macchina potrebbe essere in modalità setup, test dei filtri in corso o in service mode (portella aperta)
+          example: "TRUE"
+        name:
+          type: string
+          description: Identificativo univoco della macchina (es. MAC Address / Chip ID)
+          example: "F412FACD51AE"
+        data:
+          $ref: '#/components/schemas/MachineData'
+      example:
+        lastUpdate: 1775720173
+        chrono_id: "00000000"
+        status: "TRUE"
+        name: "F412FACD51AE"
+        data:
+          event: "api"
+          sensors:
+            Sin:
+              pressure: 99490.5
+              temperature: 292.28
+              humidity: 0.41515
+            Sout:
+              pressure: 99490.5
+              temperature: 291.49002
+              humidity: 0.41515
+            Iin:
+              pressure: 99485.0
+              temperature: 291.98999
+              humidity: 0.41554
+            Iout:
+              pressure: 99472.0
+              temperature: 291.78
+              humidity: 0.41563
+          mode:
+            speed: "auto"
+            autoSpeed: "2"
+            flowIn: "TRUE"
+            flowOut: "TRUE"
+            bypassMode: "0"
+            iaq: 100
+            temperatureIn: 291.98999
+            temperatureOut: 292.28
+            humidityIn: 0.41554
+            humidityOut: 0.41515
+            pressureIn: 99485.0
+            pressureOut: 99490.5
+          filter:
+            hepa:
+              status: 4
+              changed: 532880
+            g4:
+              status: 4
+              changed: 532880
+          alert:
+            update_reboot: "FALSE"
+            worries: "FALSE"
+            ice: "FALSE"
+            condensation: "FALSE"
+            filterS: 0
+            filterI: 0
+            warmup: "FALSE"
+            service: "FALSE"
+            fault-code: "0x000f7fdf"
+            net-fault-code: "0x0000001f"
+            version: "1.9.3 D"
+
+    MachineData:
+      type: object
+      properties:
+        event:
+          type: string
+          description: Sorgente dell'evento
+          example: "api"
+        sensors:
+          $ref: '#/components/schemas/MachineSensors'
+        mode:
+          $ref: '#/components/schemas/MachineMode'
+        filter:
+          $ref: '#/components/schemas/MachineFilter'
+        alert:
+          $ref: '#/components/schemas/MachineAlert'
+
+    MachineSensors:
+      type: object
+      properties:
+        Sin:
+          descrption: Dati dal sensore del ramo immissione posto prima della ventola
+          $ref: '#/components/schemas/SensorReadings'
+        Sout:
+          descrption: Dati dal sensore del ramo immissione posto dopo la ventola
+          $ref: '#/components/schemas/SensorReadings'
+        Iin:
+          descrption: Dati dal sensore del ramo estrazione posto prima della ventola
+          $ref: '#/components/schemas/SensorReadings'
+        Iout:
+          descrption: Dati dal sensore del ramo estrazione posto dopo la ventola
+          $ref: '#/components/schemas/SensorReadings'
+
+    SensorReadings:
+      type: object
+      description: Letture ambientali per un singolo canale
+      properties:
+        pressure:
+          type: number
+          format: float
+          description: Pressione in Pascal (Pa)
+          example: 99490.5
+        temperature:
+          type: number
+          format: float
+          description: Temperatura in Kelvin (K)
+          example: 292.28
+        humidity:
+          type: number
+          format: float
+          description: Umidità relativa (rapporto 0.0 - 1.0)
+          example: 0.41515
+
+    MachineMode:
+      type: object
+      properties:
+        speed:
+          type: string
+          description: Velocità impostata (1-5, off, auto, boost)
+          example: "auto"
+        autoSpeed:
+          type: string
+          description: Velocità attuale calcolata in modalità automatica
+          example: "2"
+        flowIn:
+          type: boolean
+          description: Stato attivo/non attivo flusso in immissione
+          example: "TRUE"
+        flowOut:
+          type: boolean
+          description: Stato attivo/non attivo flusso in estrazione
+          example: "TRUE"
+        bypassMode:
+          type: string
+          description: Stato modalità bypass (0 immissione ed estrazione, 1 solo immissione, 2 solo estrazione)
+          example: "0"
+        bypassOn:
+          type: boolean
+          description: Indica lo stato di attivazione della modalità Bypass
+          example: "FALSE"
+        iaq:
+          type: integer
+          description: Indice di Qualità dell'Aria (0-100)
+          example: 100
+        temperatureIn:
+          type: number
+          description: Temperatura dell'aria proveniente dall'interno
+          format: float
+          example: 291.98999
+        temperatureOut:
+          type: number
+          description: Temperatura dell'aria proveniente dall'esterno
+          format: float
+          example: 292.28
+        humidityIn:
+          type: number
+          description: Grado di umidità proveniente dall'interno
+          format: float
+          example: 0.41554
+        humidityOut:
+          type: number
+          description: Grado di umidità proveniente dall'esterno
+          format: float
+          example: 0.41515
+        pressureIn:
+          type: number
+          description: Pressione dell'aria proveniente dall'interno
+          format: float
+          example: 99485.0
+        pressureOut:
+          type: number
+          description: Pressione dell'aria proveniente dall'esterno
+          format: float
+          example: 99490.5
+
+    MachineFilter:
+      type: object
+      properties:
+        hepa:
+          description: Stato del filtro HEPA
+          $ref: '#/components/schemas/FilterDetail'
+        g4:
+          description: Stato del filtro g4
+          $ref: '#/components/schemas/FilterDetail'
+
+    FilterDetail:
+      type: object
+      properties:
+        status:
+          type: integer
+          description: Stato di usura del filtro da 0 a 4 (in percentuale dove 4 filtro pulito e 0 filtro intasato step del 25%)
+          example: 4
+        changed:
+          type: integer
+          description: Secondi trascorsi dall'ultimo cambio del filtro
+          example: 532880
+
+    MachineAlert:
+      type: object
+      properties:
+        update_reboot:
+          type: boolean
+          description: la macchina comunica il riavvio a causa di un aggiornamento OTA
+          example: "FALSE"
+        worries:
+          type: boolean
+          description: Indiaca se la macchina ha un guasto
+          example: "FALSE"
+        ice:
+          type: boolean
+          description: Indica se la macchina è in stato di protezione per rischio ghiaccio
+          example: "FALSE"
+        condensation:
+          type: boolean
+          description: Indica se la macchina è in stato di protezione per rischio condensa
+          example: "FALSE"
+        filterS:
+          type: integer
+          description: Stato del filtro canale immissione (0 presente e pulito, 1 presente e sporco, 2 presente e intasato, 3 filtro mancante, 4 filtro non controllato)
+          example: 0
+        filterI:
+          type: integer
+          description: Stato del filtro canale estrazione (0 presente e pulito, 1 presente e sporco, 2 presente e intasato, 3 filtro mancante, 4 filtro non controllato)
+          example: 0
+        warmup:
+          type: boolean
+          description: La macchina sta eseguendo il test dei filtri, in questo stato ignora ogni comando ricevuto
+          example: "FALSE"
+        service:
+          type: boolean
+          description: La macchina è in modalità service, la portella è aperta
+          example: "FALSE"
+        fault-code:
+          type: string
+          description: Codice guasto macchina in esadecimale
+          example: "0x000f7fdf"
+        net-fault-code:
+          type: string
+          description: Codice guasto rete in esadecimale
+          example: "0x0000001f"
+        version:
+          type: string
+          description: Versione firmware
+          example: "1.9.3 D"
