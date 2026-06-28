@@ -1,7 +1,7 @@
 """Main client for interacting with the FlowIt VMC machine."""
 
 from functools import wraps
-from typing import Any, Callable, Optional, TypeVar, cast
+from typing import Any, Awaitable, Callable, Optional, TypeVar, cast
 
 import httpx
 
