@@ -33,9 +33,28 @@ class FlowItWebSocket:
             host.replace("http://", "ws://").replace("https://", "wss://").rstrip("/")
         )
         self._auth = auth
-        self._on_data = on_data
+        self._callbacks: list[Callable[[MachineData], Awaitable[None]]] = []
+        if on_data is not None:
+            self._callbacks.append(on_data)
         self._stop = False
         self._task: Optional[asyncio.Task] = None
+
+    def register_callback(
+        self, callback: Callable[[MachineData], Awaitable[None]]
+    ) -> Callable[[], None]:
+        """
+        Register a callback to be called when new data is received via websocket.
+
+        :param callback: Async function to call with the new MachineData.
+        :return: A function that can be called to unregister the callback.
+        """
+        self._callbacks.append(callback)
+
+        def unregister() -> None:
+            if callback in self._callbacks:
+                self._callbacks.remove(callback)
+
+        return unregister
 
     async def listen(self) -> None:
         """
@@ -61,8 +80,8 @@ class FlowItWebSocket:
                             # The WS might send the full MachineStatusResponse or just MachineData
                             # Based on specs, it's usually the full status
                             status = MachineStatusResponse(**data_dict)
-                            if self._on_data:
-                                await self._on_data(status.data)
+                            for callback in self._callbacks:
+                                await callback(status.data)
                         except Exception as e:
                             _LOGGER.error("Failed to parse WebSocket message: %s", e)
 

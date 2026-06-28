@@ -99,6 +99,17 @@ class FlowItVMCMachine:
             # until a refresh_state is called.
             pass
 
+    def register_websocket_callback(
+        self, callback: Callable[[MachineData], Awaitable[None]]
+    ) -> Callable[[], None]:
+        """
+        Register a callback to be invoked when new data is received via the websocket.
+
+        :param callback: Async function taking MachineData as parameter.
+        :return: A function that can be called to unregister the callback.
+        """
+        return self.websocket.register_callback(callback)
+
     @property
     def machine_state(self) -> Optional[MachineData]:
         """
@@ -109,6 +120,15 @@ class FlowItVMCMachine:
         if self._state:
             return self._state.data
         return None
+
+    @property
+    def state(self) -> Optional[MachineStatusResponse]:
+        """
+        Return the full current machine state including metadata.
+
+        :return: MachineStatusResponse or None.
+        """
+        return self._state
 
     @property
     def is_connected(self) -> bool:
