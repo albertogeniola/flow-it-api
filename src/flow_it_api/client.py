@@ -184,6 +184,10 @@ class FlowItVMCMachine:
             response.raise_for_status()
             self._state = MachineStatusResponse(**response.json())
             return self._state.data
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 401:
+                raise
+            raise FlowItConnectionError(f"Failed to refresh state: {e}") from e
         except httpx.HTTPError as e:
             raise FlowItConnectionError(f"Failed to refresh state: {e}") from e
         except Exception as e:
@@ -222,6 +226,10 @@ class FlowItVMCMachine:
                 self._state.data.mode.flowOut = cmd_resp.flowOut
 
             return cmd_resp
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 401:
+                raise
+            raise FlowItCommandError(f"Command failed: {e}") from e
         except httpx.HTTPError as e:
             raise FlowItCommandError(f"Command failed: {e}") from e
 
