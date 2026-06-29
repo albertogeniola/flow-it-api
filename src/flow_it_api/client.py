@@ -1,7 +1,17 @@
 """Main client for interacting with the FlowIt VMC machine."""
 
 from functools import wraps
-from typing import Any, Awaitable, Callable, Optional, TypeVar, cast
+from typing import (
+    Any,
+    Awaitable,
+    Callable,
+    Concatenate,
+    Coroutine,
+    Optional,
+    ParamSpec,
+    TypeVar,
+    cast,
+)
 
 import httpx
 
@@ -17,10 +27,13 @@ from .models import (
 )
 from .websocket import FlowItWebSocket
 
-F = TypeVar("F", bound=Callable[..., Any])
+P = ParamSpec("P")
+R = TypeVar("R")
 
 
-def authenticated(func: F) -> F:
+def authenticated(
+    func: Callable[Concatenate["FlowItVMCMachine", str, P], Coroutine[Any, Any, R]]
+) -> Callable[Concatenate["FlowItVMCMachine", P], Coroutine[Any, Any, R]]:
     """
     Decorator to ensure the client is authenticated before calling a method.
 
@@ -28,7 +41,7 @@ def authenticated(func: F) -> F:
     """
 
     @wraps(func)
-    async def wrapper(self: "FlowItVMCMachine", *args: Any, **kwargs: Any) -> Any:
+    async def wrapper(self: "FlowItVMCMachine", *args: P.args, **kwargs: P.kwargs) -> R:
         token = await self._auth.get_valid_token()
         try:
             return await func(self, token, *args, **kwargs)
@@ -39,7 +52,7 @@ def authenticated(func: F) -> F:
                 return await func(self, token, *args, **kwargs)
             raise
 
-    return cast(F, wrapper)
+    return wrapper
 
 
 class FlowItVMCMachine:
